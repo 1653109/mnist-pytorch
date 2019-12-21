@@ -14,11 +14,7 @@ def main():
   # network.load_state_dict(torch.load('./results/model.pth'))
   network.load_state_dict(torch.load('./res-valid/model.pth'))
   network.eval();
-  # image = Image.open('test-img.jpg')
   image = Image.open('test_img.jpg').convert('L')
-  # plt.figure()
-  # plt.imshow(image) 
-  # plt.show()  # display it
   x = TF.to_tensor(image)
   x.unsqueeze_(0)
   output = network(x)
