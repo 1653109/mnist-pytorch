@@ -8,7 +8,7 @@ from network import Net
 from sklearn.metrics import precision_recall_fscore_support as score
 
 # chuẩn bị dữ liệu =========================
-n_epochs = 3 # Số lần lặp
+n_epochs = 5 # Số lần lặp
 batch_size_train = 128 # training size
 batch_size_test = 1000 # testing data
 learning_rate = 0.05
@@ -40,25 +40,12 @@ test_loader = torch.utils.data.DataLoader(
   batch_size=batch_size_test, shuffle=True)
 # ==========================================
 
-# examples = enumerate(test_loader)
-# batch_idx, (example_data, example_targets) = next(examples)
-
-# print(example_data.shape)
-
-# fig = plt.figure()
-# for i in range(6):
-#   plt.subplot(2,3,i+1)
-#   plt.tight_layout()
-#   plt.imshow(example_data[i][0], cmap='gray', interpolation='none')
-#   plt.title("Ground Truth: {}".format(example_targets[i]))
-#   plt.xticks([])
-#   plt.yticks([])
-# fig
-
 # khởi tạo mạng =============================
-network = Net()
-# network.cuda() # setting để chạy bằng gpu
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# network = Net()
+network = Net().to(device=device)
 optimizer = optim.SGD(network.parameters(), lr=learning_rate,momentum=momentum)
+# network.cuda()
 # ==========================================
 
 # các biến để kiểm tra tiến độ =============
@@ -72,6 +59,8 @@ test_counter = [i*len(train_loader.dataset) for i in range(n_epochs + 1)]
 def train(epoch):
   network.train()
   for batch_idx, (data, target) in enumerate(train_loader):
+    target = target.to(device)
+    data = data.to(device)
     optimizer.zero_grad()
     output = network(data)
     loss = F.nll_loss(output, target)
@@ -89,6 +78,11 @@ def train(epoch):
 # ===================================================================
 
 # test ============================================================
+# precisionArr = []
+# recallAr = []
+# fscoreAr = []
+# lossArr = []
+# accuracyArr = []
 def test():
   network.eval()
   test_loss = 0
@@ -97,16 +91,18 @@ def test():
   y_test = [] 
   with torch.no_grad():
     for data, target in test_loader:
+      target = target.to(device)
+      data = data.to(device)
       output = network(data)
       test_loss += F.nll_loss(output, target, size_average=False).item()
       pred = output.data.max(1, keepdim=True)[1]
       correct += pred.eq(target.data.view_as(pred)).sum()
-      predicted = np.concatenate((predicted, pred.numpy().flatten()), axis=0)
-      y_test = np.concatenate((y_test, target.data.view_as(pred).numpy().flatten()), axis=0)
+      predicted = np.concatenate((predicted, pred.cpu().detach().numpy().flatten()), axis=0)
+      y_test = np.concatenate((y_test, target.data.view_as(pred).cpu().detach().numpy().flatten()), axis=0)
   test_loss /= len(test_loader.dataset)
   test_losses.append(test_loss)
 
-  precision, recall, fscore, support = score(y_test, predicted)
+  precision, recall, fscore, support = score(y_test, predicted, average='macro')
   print('precision: {}'.format(precision))
   print('recall: {}'.format(recall))
   print('fscore: {}'.format(fscore))
