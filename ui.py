@@ -3,7 +3,6 @@ from PIL import Image
 import io
 import numpy as np
 import matplotlib.pyplot as plt
-import cv2
 import torch
 import torchvision
 import numpy as np
@@ -56,11 +55,9 @@ class DigitsClassifier(Frame):
     :return: digit
     """
     network = Net()
-    # network.load_state_dict(torch.load('./results/model.pth'))
-    network.load_state_dict(torch.load('./res-valid/model.pth'))
-    network.eval();
+    network.load_state_dict(torch.load('./results/model.pth', map_location=torch.device("cpu")))
+    network.eval(); # chuyển sang chế độ kiểm tra
     image = Image.open('result.png').convert('L')
-    # image = image[44:45, 44:45, :]
     image = image.resize((28, 28), Image.ANTIALIAS)
     x = TF.to_tensor(image)
     x.unsqueeze_(0)
@@ -96,10 +93,10 @@ class DigitsClassifier(Frame):
     self.canv.bind("<B1-Motion>", self.draw)
     color_lab = Label(self, text="Color: ")
     color_lab.grid(row=0, column=0, padx=6)
-    black_btn = Button(self, text="Black", width=10, command=lambda: self.set_color("black"))
-    black_btn.grid(row=0, column=2)
-    white_btn = Button(self, text="White", width=10, command=lambda: self.set_color("white"))
-    white_btn.grid(row=0, column=3)
+    # black_btn = Button(self, text="Black", width=10, command=lambda: self.set_color("black"))
+    # black_btn.grid(row=0, column=2)
+    # white_btn = Button(self, text="White", width=10, command=lambda: self.set_color("white"))
+    # white_btn.grid(row=0, column=3)
     clear_btn = Button(self, text="Clear all", width=10, command=lambda: self.clear_all(self))
     clear_btn.grid(row=0, column=4, sticky=W)
     size_lab = Label(self, text="Brush size: ")

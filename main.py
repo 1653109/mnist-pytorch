@@ -4,14 +4,16 @@ import matplotlib.pyplot as plt
 import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
+import csv
 from network import Net
 from sklearn.metrics import precision_recall_fscore_support as score
+from torch.utils.data.sampler import SubsetRandomSampler
 
 # chuẩn bị dữ liệu =========================
-n_epochs = 5 # Số lần lặp
-batch_size_train = 128 # training size
+n_epochs = 20 # Số lần lặp
+batch_size_train = 64 # training size
 batch_size_test = 1000 # testing data
-learning_rate = 0.05
+learning_rate = 0.01
 momentum = 0.5
 log_interval = 10
 
@@ -21,14 +23,12 @@ torch.manual_seed(random_seed)
 # =========================================
 
 # tải dữ liệu =============================
-train_loader = torch.utils.data.DataLoader(
-  torchvision.datasets.MNIST('./files/', train=True, download=True,
-    transform=torchvision.transforms.Compose([
-      torchvision.transforms.ToTensor(),
-      torchvision.transforms.Normalize(
-        (0.1307,), (0.3081,))
-    ])),
-  batch_size=batch_size_train, shuffle=True)
+my_data = torchvision.datasets.MNIST('./files/', train=True, download=True,
+  transform=torchvision.transforms.Compose([
+    torchvision.transforms.ToTensor(),
+    torchvision.transforms.Normalize(
+      (0.1307,), (0.3081,))
+  ]))
 
 test_loader = torch.utils.data.DataLoader(
   torchvision.datasets.MNIST('./files/', train=False, download=True,
@@ -38,51 +38,103 @@ test_loader = torch.utils.data.DataLoader(
         (0.1307,), (0.3081,))
     ])),
   batch_size=batch_size_test, shuffle=True)
+# khởi tạo tập train và tập validation từ train_loader =====
+## chia ngẫu nhiên tập train_loader
+validation_plit = 0.1;
+val_len = int(np.floor(validation_plit * len(my_data)))
+indices = list(range(len(my_data)))
+validation_idx = np.random.choice(indices, size=val_len, replace=False)
+train_idx = list(set(indices) - set(validation_idx))
+## đẩy dữ liệu vào các tập train và validate
+train_sampler = SubsetRandomSampler(train_idx)
+validation_sampler = SubsetRandomSampler(validation_idx)
+
+train_loader = torch.utils.data.DataLoader(my_data, sampler=train_sampler, batch_size=batch_size_train)
+validation_loader = torch.utils.data.DataLoader(my_data, sampler=validation_sampler, batch_size=batch_size_test)
+data_loaders = {"train": train_loader, "val": validation_loader}
+data_lengths = {"train": len(train_idx), "val": val_len}
 # ==========================================
 
 # khởi tạo mạng =============================
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# network = Net()
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 network = Net().to(device=device)
 optimizer = optim.SGD(network.parameters(), lr=learning_rate,momentum=momentum)
-# network.cuda()
 # ==========================================
 
 # các biến để kiểm tra tiến độ =============
 train_losses = []
 train_counter = []
+
+valid_precisions = []
+valid_recalls = []
+valid_fscores = []
+valid_accuracies = []
+valid_losses = []
+
 test_losses = []
-test_counter = [i*len(train_loader.dataset) for i in range(n_epochs + 1)]
+test_precisions = []
+test_recalls = []
+test_fscores = []
+test_accuracies = []
+test_counter = [i*data_lengths['train'] for i in range(n_epochs + 1)]
 # ==========================================
 
 # train ====================================
 def train(epoch):
-  network.train()
-  for batch_idx, (data, target) in enumerate(train_loader):
-    target = target.to(device)
-    data = data.to(device)
-    optimizer.zero_grad()
-    output = network(data)
-    loss = F.nll_loss(output, target)
-    loss.backward()
-    optimizer.step()
-    if batch_idx % log_interval == 0:
-      print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-        epoch, batch_idx * len(data), len(train_loader.dataset),
-        100. * batch_idx / len(train_loader), loss.item()))
-      train_losses.append(loss.item())
-      train_counter.append(
-        (batch_idx*64) + ((epoch-1)*len(train_loader.dataset)))
-      torch.save(network.state_dict(), './results/model.pth')
-      torch.save(optimizer.state_dict(), './results/optimizer.pth')
+  valid_loss = 0
+  correct = 0
+  predicted = [] 
+  y_test = []
+  # thay đổi luân phiên giữa hai phase train và validate
+  for phase in ['train', 'val']:
+    if phase == 'train':
+      network.train()
+    else:
+      network.eval()
+    # lập với mỗi hình trong data
+    for batch_idx, (data, target) in enumerate(data_loaders[phase]):
+      target = target.to(device)
+      data = data.to(device)
+      optimizer.zero_grad()
+      output = network(data)
+      
+      if phase == 'train':
+        loss = F.nll_loss(output, target)
+        loss.backward()
+        optimizer.step()
+      
+      if phase == 'val':
+        valid_loss += F.nll_loss(output, target, size_average=False).item()
+        pred = output.data.max(1, keepdim=True)[1]
+        correct += pred.eq(target.data.view_as(pred)).sum()
+        predicted = np.concatenate((predicted, pred.cpu().detach().numpy().flatten()), axis=0)
+        y_test = np.concatenate((y_test, target.data.view_as(pred).cpu().detach().numpy().flatten()), axis=0)
+
+      if batch_idx % log_interval == 0:
+        if phase == 'train':
+          print('Train Epoch: {} [{}/{} ({:.4f}%)]\tLoss: {:.6f}'.format(
+            epoch, batch_idx * len(data), data_lengths['train'],
+            100. * batch_idx / len(data_loaders['train']), loss.item()))
+          train_losses.append(loss.item())
+          train_counter.append((batch_idx*64) + ((epoch-1)*data_lengths['train']))
+          torch.save(network.state_dict(), './res-valid/model.pth')
+          torch.save(optimizer.state_dict(), './res-valid/optimizer.pth')
+
+    if phase == 'val':
+      valid_loss /= data_lengths['val']
+      precision, recall, fscore, support = score(y_test, predicted, average='macro')
+      valid_losses.append(valid_loss)
+      valid_accuracies.append(correct.item() / data_lengths['val'])
+      valid_precisions.append(precision)
+      valid_recalls.append(recall)
+      valid_fscores.append(fscore)
+      print('\nValidation set: Avg. loss: {:.4f}, Accuracy: {}/{} ({:.4f}%)\n'.format(
+        valid_loss, correct, data_lengths['val'],
+        100. * correct / data_lengths['val']))
+      
 # ===================================================================
 
 # test ============================================================
-# precisionArr = []
-# recallAr = []
-# fscoreAr = []
-# lossArr = []
-# accuracyArr = []
 def test():
   network.eval()
   test_loss = 0
@@ -107,21 +159,41 @@ def test():
   print('recall: {}'.format(recall))
   print('fscore: {}'.format(fscore))
   print('support: {}'.format(support))
+  test_precisions.append(precision)
+  test_recalls.append(recall)
+  test_fscores.append(fscore)
+  test_accuracies.append(100. * correct / len(test_loader.dataset))
   print('\nTest set: Avg. loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
     test_loss, correct, len(test_loader.dataset),
     100. * correct / len(test_loader.dataset)))
 # ==============================================================
 
 # chạy chương trình ==============================================
-test() # chạy test trước khi lặp để khởi tạo model với những tham số ngẫu nhiên
 for epoch in range(1, n_epochs + 1):
   train(epoch)
-  test()
+test()
 
-fig = plt.figure()
-plt.plot(train_counter, train_losses, color='blue')
-plt.scatter(test_counter, test_losses, color='red')
-plt.legend(['Train Loss', 'Test Loss'], loc='upper right')
-plt.xlabel('number of training examples seen')
-plt.ylabel('negative log likelihood loss')
+# lưu các thông số đánh giá mô hình ra file csv
+with open('results.csv', 'w', newline='') as file:
+  writer = csv.writer(file)
+  writer.writerow(['Loss', 'Accuracy', 'Precision', 'Recalls', 'F1 score'])
+  for epoch in range(0, n_epochs):
+    writer.writerow([
+      valid_losses[epoch], 
+      valid_accuracies[epoch], 
+      valid_precisions[epoch], 
+      valid_recalls[epoch], 
+      valid_fscores[epoch]
+    ])
+
+# hiển thị các thông số lên biểu đồ đường
+plt.plot(range(1, n_epochs + 1), valid_losses, color='green')
+plt.plot(range(1, n_epochs + 1), valid_accuracies, color='red')
+plt.plot(range(1, n_epochs + 1), valid_precisions, color='blue')
+plt.plot(range(1, n_epochs + 1), valid_recalls, color='purple')
+plt.plot(range(1, n_epochs + 1), valid_fscores, color='black')
+plt.legend(['Loss', 'Accuracies', 'Precision', 'Recalls', 'F1 score'], loc='upper right')
+plt.xlabel('n_epochs')
+plt.ylabel('%')
+plt.title('Graph')
 plt.show()
