@@ -8,6 +8,7 @@ import csv
 from network import Net
 from sklearn.metrics import precision_recall_fscore_support as score
 from torch.utils.data.sampler import SubsetRandomSampler
+import os.path
 
 # chuẩn bị dữ liệu =========================
 n_epochs = 20 # Số lần lặp
@@ -61,6 +62,7 @@ network = Net().to(device=device)
 optimizer = optim.SGD(network.parameters(), lr=learning_rate,momentum=momentum)
 # ==========================================
 
+epoch_next = 1 #lưu giá trị vòng lặp, nếu mới bắt đầu thì = 1, nếu train tiếp thì đọc checkpoint để lấy
 # các biến để kiểm tra tiến độ =============
 train_losses = []
 train_counter = []
@@ -79,19 +81,40 @@ test_accuracies = []
 test_counter = [i*data_lengths['train'] for i in range(n_epochs + 1)]
 # ==========================================
 
+# kiểm tra checkpoint để train tiếp, nếu có
+if os.path.isfile("./results/checkpoint.pth"):
+  checkpoint = torch.load('./results/checkpoint.pth')
+  network.load_state_dict(checkpoint['model_state_dict'])
+  optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+  epoch_next = checkpoint['epoch']
+  train_losses = checkpoint['train_losses']
+  train_counter = checkpoint['train_counter']
+
+  valid_precisions = checkpoint['valid_precisions']
+  valid_recalls = checkpoint['valid_recalls']
+  valid_fscores = checkpoint['valid_fscores']
+  valid_accuracies = checkpoint['valid_accuracies']
+  valid_losses = checkpoint['valid_losses']
+
+  test_losses = checkpoint['test_losses']
+  test_precisions = checkpoint['test_precisions']
+  test_recalls = checkpoint['test_recalls']
+  test_fscores = checkpoint['test_fscores']
+  test_accuracies = checkpoint['test_accuracies']
+  test_counter = checkpoint['test_counter']
+
 # train ====================================
 def train(epoch):
   valid_loss = 0
   correct = 0
   predicted = [] 
   y_test = []
-  # thay đổi luân phiên giữa hai phase train và validate
   for phase in ['train', 'val']:
     if phase == 'train':
       network.train()
     else:
       network.eval()
-    # lập với mỗi hình trong data
     for batch_idx, (data, target) in enumerate(data_loaders[phase]):
       target = target.to(device)
       data = data.to(device)
@@ -117,8 +140,26 @@ def train(epoch):
             100. * batch_idx / len(data_loaders['train']), loss.item()))
           train_losses.append(loss.item())
           train_counter.append((batch_idx*64) + ((epoch-1)*data_lengths['train']))
-          torch.save(network.state_dict(), './res-valid/model.pth')
-          torch.save(optimizer.state_dict(), './res-valid/optimizer.pth')
+          torch.save(network.state_dict(), './results/model.pth')
+          torch.save(optimizer.state_dict(), './results/optimizer.pth')
+          torch.save({
+            'epoch': epoch,
+            'model_state_dict': network.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'train_losses': train_losses,
+            'train_counter': train_counter,
+            'valid_precisions': valid_precisions,
+            'valid_recalls' : valid_recalls,
+            'valid_fscores': valid_fscores,
+            'valid_accuracies': valid_accuracies,
+            'valid_losses': valid_losses,
+            'test_losses': test_losses,
+            'test_precisions': test_precisions,
+            'test_recalls': test_recalls,
+            'test_fscores': test_fscores,
+            'test_accuracies': test_accuracies,
+            'test_counter': test_counter
+            }, './results/checkpoint.pth')
 
     if phase == 'val':
       valid_loss /= data_lengths['val']
@@ -169,24 +210,18 @@ def test():
 # ==============================================================
 
 # chạy chương trình ==============================================
-for epoch in range(1, n_epochs + 1):
+# test() # chạy test trước khi lặp để khởi tạo model với những tham số ngẫu nhiên
+for epoch in range(epoch_next, n_epochs + 1):
   train(epoch)
+  # test()
 test()
 
-# lưu các thông số đánh giá mô hình ra file csv
 with open('results.csv', 'w', newline='') as file:
   writer = csv.writer(file)
   writer.writerow(['Loss', 'Accuracy', 'Precision', 'Recalls', 'F1 score'])
   for epoch in range(0, n_epochs):
-    writer.writerow([
-      valid_losses[epoch], 
-      valid_accuracies[epoch], 
-      valid_precisions[epoch], 
-      valid_recalls[epoch], 
-      valid_fscores[epoch]
-    ])
+    writer.writerow([valid_losses[epoch], valid_accuracies[epoch], valid_precisions[epoch], valid_recalls[epoch], valid_fscores[epoch]])
 
-# hiển thị các thông số lên biểu đồ đường
 plt.plot(range(1, n_epochs + 1), valid_losses, color='green')
 plt.plot(range(1, n_epochs + 1), valid_accuracies, color='red')
 plt.plot(range(1, n_epochs + 1), valid_precisions, color='blue')
