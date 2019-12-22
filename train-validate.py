@@ -8,7 +8,7 @@ import csv
 from network import Net
 from sklearn.metrics import precision_recall_fscore_support as score
 from torch.utils.data.sampler import SubsetRandomSampler
-
+import os.path
 # chuẩn bị dữ liệu =========================
 n_epochs = 20 # Số lần lặp
 batch_size_train = 64 # training size
@@ -69,6 +69,7 @@ network = Net().to(device=device)
 optimizer = optim.SGD(network.parameters(), lr=learning_rate,momentum=momentum)
 # ==========================================
 
+epoch_next = 1 #lưu giá trị vòng lặp, nếu mới bắt đầu thì = 1, nếu train tiếp thì đọc checkpoint để lấy
 # các biến để kiểm tra tiến độ =============
 train_losses = []
 train_counter = []
@@ -86,6 +87,29 @@ test_fscores = []
 test_accuracies = []
 test_counter = [i*data_lengths['train'] for i in range(n_epochs + 1)]
 # ==========================================
+
+# kiểm tra checkpoint để train tiếp, nếu có
+if os.path.isfile("./res-valid/checkpoint.pth"):
+  checkpoint = torch.load('./res-valid/checkpoint.pth')
+  network.load_state_dict(checkpoint['model_state_dict'])
+  optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+  epoch_next = checkpoint['epoch']
+  train_losses = checkpoint['train_losses']
+  train_counter = checkpoint['train_counter']
+
+  valid_precisions = checkpoint['valid_precisions']
+  valid_recalls = checkpoint['valid_recalls']
+  valid_fscores = checkpoint['valid_fscores']
+  valid_accuracies = checkpoint['valid_accuracies']
+  valid_losses = checkpoint['valid_losses']
+
+  test_losses = checkpoint['test_losses']
+  test_precisions = checkpoint['test_precisions']
+  test_recalls = checkpoint['test_recalls']
+  test_fscores = checkpoint['test_fscores']
+  test_accuracies = checkpoint['test_accuracies']
+  test_counter = checkpoint['test_counter']
 
 # train ====================================
 def train(epoch):
@@ -125,6 +149,24 @@ def train(epoch):
           train_counter.append((batch_idx*64) + ((epoch-1)*data_lengths['train']))
           torch.save(network.state_dict(), './res-valid/model.pth')
           torch.save(optimizer.state_dict(), './res-valid/optimizer.pth')
+          torch.save({
+            'epoch': epoch,
+            'model_state_dict': network.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'train_losses': train_losses,
+            'train_counter': train_counter,
+            'valid_precisions': valid_precisions,
+            'valid_recalls' : valid_recalls,
+            'valid_fscores': valid_fscores,
+            'valid_accuracies': valid_accuracies,
+            'valid_losses': valid_losses,
+            'test_losses': test_losses,
+            'test_precisions': test_precisions,
+            'test_recalls': test_recalls,
+            'test_fscores': test_fscores,
+            'test_accuracies': test_accuracies,
+            'test_counter': test_counter
+            }, './res-valid/checkpoint.pth')
 
     if phase == 'val':
       valid_loss /= data_lengths['val']
@@ -176,7 +218,7 @@ def test():
 
 # chạy chương trình ==============================================
 # test() # chạy test trước khi lặp để khởi tạo model với những tham số ngẫu nhiên
-for epoch in range(1, n_epochs + 1):
+for epoch in range(epoch_next, n_epochs + 1):
   train(epoch)
   # test()
 test()
